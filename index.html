@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>U5 Biesdorf-Süd → Hauptbahnhof</title>
+<style>
+  :root { --bg:#0d0d0d; --fg:#f2f2f2; --muted:#9a9a9a; --line:#333; --u5:#7e5330; --late:#ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { height:100%; margin:0; }
+  body { background:var(--bg); color:var(--fg); font:400 2vmin/1.4 system-ui,-apple-system,Segoe UI,sans-serif;
+         padding:4vmin 5vmin; display:flex; flex-direction:column; }
+  header { display:flex; justify-content:space-between; align-items:center; }
+  .stop { display:flex; align-items:center; gap:1.5vmin; font-size:3vmin; color:#bdbdbd; }
+  .badge { background:var(--u5); color:#fff; font-weight:600; padding:.1em .5em; border-radius:.2em; }
+  #clock { font-size:5vmin; font-weight:500; }
+  .grid { flex:1; display:grid; grid-template-columns:1.1fr 1fr; gap:6vmin; align-items:center; }
+  @media (max-aspect-ratio: 1/1) { .grid { grid-template-columns:1fr; gap:3vmin; align-content:center; } }
+  .label { color:var(--muted); font-size:2.2vmin; }
+  .next { font-size:26vmin; font-weight:500; line-height:1; margin:0; }
+  .next small { font-size:6vmin; font-weight:400; color:var(--muted); margin-left:1vmin; }
+  .dir { font-size:4vmin; color:#bdbdbd; margin:1vmin 0 0; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { display:flex; justify-content:space-between; gap:2vmin; padding:2vmin 0; border-top:1px solid var(--line); font-size:3.2vmin; }
+  .late { color:var(--late); }
+  footer { color:#6f6f6f; font-size:1.6vmin; }
+</style>
+</head>
+<body>
+<header>
+  <div class="stop"><span class="badge">U5</span><span>Biesdorf-Süd → Hauptbahnhof</span></div>
+  <div id="clock"></div>
+</header>
+<div class="grid">
+  <div>
+    <div class="label">Next departure</div>
+    <p class="next" id="next">…</p>
+    <p class="dir" id="dir">Loading</p>
+  </div>
+  <ul id="list"></ul>
+</div>
+<footer id="foot"></footer>
+<script>
+const API = "https://v6.bvg.transport.rest";
+const DIRECTION = /Hauptbahnhof/i;
+let stopId = null;
+
+async function getStopId() {
+  const r = await fetch(`${API}/locations?query=${encodeURIComponent("Biesdorf-Süd")}&results=5&stops=true&addresses=false&poi=false`);
+  const j = await r.json();
+  const s = j.find(x => /Biesdorf-Süd/i.test(x.name) && x.products && x.products.subway) || j[0];
+  if (!s) throw new Error("Station not found");
+  return s.id;
+}
+
+const mins = d => Math.max(0, Math.round((new Date(d) - Date.now()) / 60000));
+const hm = d => new Date(d).toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit"});
+
+function tick() {
+  document.getElementById("clock").textContent =
+    new Date().toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit"});
+}
+
+async function update() {
+  try {
+    if (!stopId) stopId = await getStopId();
+    const r = await fetch(`${API}/stops/${stopId}/departures?duration=120&results=20&subway=true&suburban=false&bus=false&tram=false&ferry=false&express=false&regional=false`);
+    const deps = ((await r.json()).departures || [])
+      .filter(d => d.when && d.line && d.line.name === "U5" && DIRECTION.test(d.direction))
+      .slice(0, 5);
+    if (!deps.length) throw new Error("No departures found");
+
+    const m = mins(deps[0].when);
+    document.getElementById("next").innerHTML = m === 0 ? "now" : `${m}<small>min</small>`;
+    document.getElementById("dir").textContent = hm(deps[0].when) +
+      (deps[0].delay > 59 ? ` (+${Math.round(deps[0].delay/60)})` : "");
+
+    document.getElementById("list").innerHTML = deps.slice(1).map(d => {
+      const delay = d.delay > 59 ? ` <span class="late">+${Math.round(d.delay/60)}</span>` : "";
+      return `<li><span>${hm(d.when)}${delay}</span><span>${mins(d.when)} min</span></li>`;
+    }).join("");
+
+    document.getElementById("foot").textContent =
+      "Updated " + new Date().toLocaleTimeString("de-DE") + " · BVG via transport.rest";
+  } catch (e) {
+    document.getElementById("next").textContent = "–";
+    document.getElementById("dir").textContent = "Could not load departures (" + e.message + ")";
+  }
+}
+tick(); setInterval(tick, 1000);
+update(); setInterval(update, 30000);
+</script>
+</body>
+</html>
